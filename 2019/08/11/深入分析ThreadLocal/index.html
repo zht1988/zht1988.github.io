@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head><meta name="generator" content="Hexo 3.9.0">
+  <meta charset="utf-8">
+  
+
+  
+  <title>深入分析ThreadLocal | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="ThreadLoacal是什么？ThreadLocal提供了一种解决多线程环境下成员变量的问题，但是它并不是解决多线程共享变量的问题。那么ThreadLocal到底是什么呢？ API是这样介绍它的：  This class provides thread-local variables. These variables differ from their normal counterparts i">
+<meta property="og:type" content="article">
+<meta property="og:title" content="深入分析ThreadLocal">
+<meta property="og:url" content="http://yoursite.com/2019/08/11/深入分析ThreadLocal/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="ThreadLoacal是什么？ThreadLocal提供了一种解决多线程环境下成员变量的问题，但是它并不是解决多线程共享变量的问题。那么ThreadLocal到底是什么呢？ API是这样介绍它的：  This class provides thread-local variables. These variables differ from their normal counterparts i">
+<meta property="og:locale" content="default">
+<meta property="og:updated_time" content="2019-08-11T14:44:55.676Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="深入分析ThreadLocal">
+<meta name="twitter:description" content="ThreadLoacal是什么？ThreadLocal提供了一种解决多线程环境下成员变量的问题，但是它并不是解决多线程共享变量的问题。那么ThreadLocal到底是什么呢？ API是这样介绍它的：  This class provides thread-local variables. These variables differ from their normal counterparts i">
+  
+    <link rel="alternate" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  
+    <link href="//fonts.googleapis.com/css?family=Source+Code+Pro" rel="stylesheet" type="text/css">
+  
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+</html>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://yoursite.com"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-深入分析ThreadLocal" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2019/08/11/深入分析ThreadLocal/" class="article-date">
+  <time datetime="2019-08-11T11:39:58.000Z" itemprop="datePublished">2019-08-11</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      深入分析ThreadLocal
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h1 id="ThreadLoacal是什么？"><a href="#ThreadLoacal是什么？" class="headerlink" title="ThreadLoacal是什么？"></a>ThreadLoacal是什么？</h1><p>ThreadLocal提供了一种解决多线程环境下成员变量的问题，但是它并不是解决多线程共享变量的问题。那么ThreadLocal到底是什么呢？</p>
+<p>API是这样介绍它的：</p>
+<blockquote>
+<p>This class provides thread-local variables. These variables differ from their normal counterparts in that each thread that accesses one (via its {@code get} or {@code set} method) has its own, independently initialized copy of the variable. {@code ThreadLocal} instances are typically private static fields in classes that wish to associate state with a thread (e.g.,a user ID or Transaction ID).</p>
+</blockquote>
+<blockquote>
+<p>该类提供了线程局部 (thread-local) 变量。这些变量不同于它们的普通对应物，因为访问某个变量（通过其get 或 set 方法）的每个线程都有自己的局部变量，它独立于变量的初始化副本。ThreadLocal实例通常是类中的 private static 字段，它们希望将状态与某一个线程（例如，用户 ID 或事务 ID）相关联。</p>
+</blockquote>
+<p>所以ThreadLocal与线程同步机制不同，线程同步机制是多个线程共享同一个变量，而ThreadLocal是为每一个线程创建一个单独的变量副本，故而每个线程都可以独立地改变自己所拥有的变量副本，而不会影响其他线程所对应的副本。可以说ThreadLocal为多线程环境下变量问题提供了另外一种解决思路。</p>
+<p>ThreadLocal定义了四个方法：</p>
+<ol>
+<li>get()：返回此线程局部变量的当前线程副本中的值。</li>
+<li>initialValue()：返回此线程局部变量的当前线程的“初始值”。</li>
+<li>remove()：移除此线程局部变量当前线程的值。</li>
+<li>set(T value)：将此线程局部变量的当前线程副本中的值设置为指定值。</li>
+</ol>
+<p>除了这四个方法，ThreadLocal内部还有一个静态内部类ThreadLocalMap，该内部类才是实现线程隔离机制的关键，get()、set()、remove()都是基于该内部类操作。ThreadLocalMap提供了一种用键值对方式存储每一个线程的变量副本的方法，key为当前ThreadLocal对象，value则是对应线程的变量副本。</p>
+<p>对于ThreadLocal需要注意的有两点：</p>
+<ol>
+<li>ThreadLocal实例本身是不存储值，它只是提供了一个在当前线程中找到副本值得key。</li>
+<li>是ThreadLocal包含在Thread中，而不是Thread包含在ThreadLocal中。</li>
+</ol>
+<h1 id="ThreadLocal使用示例"><a href="#ThreadLocal使用示例" class="headerlink" title="ThreadLocal使用示例"></a>ThreadLocal使用示例</h1><p>示例如下：</p>
+<pre><code>public class SeqCount {
+
+    private static ThreadLocal&lt;Integer&gt; seqCount = new ThreadLocal&lt;Integer&gt;() {
+        // 实现initialValue()
+        public Integer initialValue() {
+            return 0;
+        }
+    };
+
+    public int nextSeq() {
+        seqCount.set(seqCount.get() + 1);
+
+        return seqCount.get();
+    }
+
+    public static void main(String[] args) {
+        SeqCount seqCount = new SeqCount();
+
+        SeqThread thread1 = new SeqThread(seqCount);
+        SeqThread thread2 = new SeqThread(seqCount);
+        SeqThread thread3 = new SeqThread(seqCount);
+        SeqThread thread4 = new SeqThread(seqCount);
+
+        thread1.start();
+        thread2.start();
+        thread3.start();
+        thread4.start();
+    }
+
+    private static class SeqThread extends Thread {
+        private SeqCount seqCount;
+
+        SeqThread(SeqCount seqCount) {
+            this.seqCount = seqCount;
+        }
+
+        public void run() {
+            for (int i = 0; i &lt; 3; i++) {
+                System.out.println(Thread.currentThread().getName() + &quot; seqCount :&quot; + seqCount.nextSeq());
+            }
+        }
+    }
+}</code></pre>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://yoursite.com/2019/08/11/深入分析ThreadLocal/" data-id="cjz733nrx0000pwxtf4oqooge" class="article-share-link">Share</a>
+      
+      
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2019/07/28/Java中CompletableFuture异步编程/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">Java中CompletableFuture异步编程</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+
+  
+    
+
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/08/">August 2019</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recent Posts</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2019/08/11/深入分析ThreadLocal/">深入分析ThreadLocal</a>
+          </li>
+        
+          <li>
+            <a href="/2019/07/28/Java中CompletableFuture异步编程/">Java中CompletableFuture异步编程</a>
+          </li>
+        
+          <li>
+            <a href="/2019/07/22/hello-world/">Hello World</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2019 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css">
+  <script src="/fancybox/jquery.fancybox.pack.js"></script>
+
+
+<script src="/js/script.js"></script>
+
+
+
+  </div>
+</body>
+</html>
